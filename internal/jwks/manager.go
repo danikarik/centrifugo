@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/url"
 	"time"
@@ -87,25 +88,31 @@ func NewManager(rawURL string, opts ...Option) (*Manager, error) {
 // FetchKey fetches JWKS from public source or cache.
 func (m *Manager) FetchKey(ctx context.Context, kid string) (*JWK, error) {
 	if kid == "" {
+		log.Println(ErrKeyIDNotProvided)
 		return nil, ErrKeyIDNotProvided
 	}
 
 	// If useCache is true, first try to get key from cache.
 	if m.useCache {
+		log.Printf("cache lookup: %s\n", kid)
 		key, err := m.cache.Get(kid)
 		if err == nil {
+			log.Printf("return form cache: %s\n", kid)
 			return key, nil
 		}
 	}
 
 	// Otherwise fetch from public JWKS.
 	v, err, _ := m.group.Do(kid, func() (interface{}, error) {
+		log.Printf("init single flight: %s\n", kid)
 		return m.fetchKey(ctx, kid)
 	})
 	if err != nil {
+		log.Printf("single flight failed: %v", err)
 		return nil, err
 	}
 
+	log.Println("returning JWK")
 	return v.(*JWK), nil
 }
 
@@ -135,6 +142,7 @@ func (m *Manager) fetchKey(ctx context.Context, kid string) (*JWK, error) {
 	retries := m.retries
 	for {
 		if retries == 0 {
+			log.Printf("retries exceeded: %v\n", err)
 			return nil, lastError
 		}
 		retries--
@@ -148,10 +156,12 @@ func (m *Manager) fetchKey(ctx context.Context, kid string) (*JWK, error) {
 	}
 
 	if err := json.Unmarshal(data, &set); err != nil {
+		log.Println(errUnmarshal)
 		return nil, fmt.Errorf("%w: %v", errUnmarshal, err)
 	}
 
 	if len(set.Keys) == 0 {
+		log.Println("empty set")
 		return nil, ErrPublicKeyNotFound
 	}
 
@@ -161,6 +171,7 @@ func (m *Manager) fetchKey(ctx context.Context, kid string) (*JWK, error) {
 	for _, spec := range set.Keys {
 		key, err := spec.ToJWK()
 		if err != nil {
+			log.Println("invalid spec for:", spec.KeyID)
 			return nil, fmt.Errorf("%w: %v", errConvert, err)
 		}
 
@@ -179,6 +190,7 @@ func (m *Manager) fetchKey(ctx context.Context, kid string) (*JWK, error) {
 	}
 
 	if res == nil {
+		log.Println(ErrPublicKeyNotFound)
 		return nil, ErrPublicKeyNotFound
 	}
 

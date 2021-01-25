@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -45,7 +46,10 @@ func NewTokenVerifierJWT(config VerifierConfig) *VerifierJWT {
 	if config.JWKSPublicEndpoint != "" {
 		mng, err := jwks.NewManager(config.JWKSPublicEndpoint)
 		if err == nil {
+			log.Println("manager init success")
 			verifier.jwksManager = &jwksManager{mng}
+		} else {
+			log.Printf("manager init %s: %v\n", config.JWKSPublicEndpoint, err)
 		}
 	}
 
@@ -88,29 +92,39 @@ func (j *jwksManager) verify(token *jwt.Token) error {
 
 	key, err := j.Manager.FetchKey(context.Background(), kid)
 	if err != nil {
+		log.Printf("FetchKey: %v\n", err)
 		return err
 	}
 
 	if key.Kty != "RSA" {
+		log.Printf("Kty: %v\n", errUnsupportedAlgorithm)
 		return errUnsupportedAlgorithm
 	}
 
 	spec, err := key.ParseKeySpec()
 	if err != nil {
+		log.Printf("ParseKeySpec: %v\n", err)
 		return err
 	}
 
 	pubKey, ok := spec.Key.(*rsa.PublicKey)
 	if !ok {
+		log.Printf("rsa.PublicKey: %v\n", errPublicKeyInvalid)
 		return errPublicKeyInvalid
 	}
 
 	verifier, err := jwt.NewVerifierRS(jwt.Algorithm(spec.Algorithm), pubKey)
 	if err != nil {
+		log.Printf("NewVerifierRS %s: %v\n", spec.Algorithm, err)
 		return fmt.Errorf("%w: %s", errUnsupportedAlgorithm, spec.Algorithm)
 	}
 
-	return verifier.Verify(token.Payload(), token.Signature())
+	if err := verifier.Verify(token.Payload(), token.Signature()); err != nil {
+		log.Printf("Verify: %v\n", err)
+		return err
+	}
+
+	return nil
 }
 
 type algorithms struct {
